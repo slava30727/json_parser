@@ -14,6 +14,78 @@ pub enum JsonValue {
 }
 
 impl JsonValue {
+    pub fn as_bool(&self) -> Option<bool> {
+        if let JsonValue::Bool(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_integer(&self) -> Option<i64> {
+        if let JsonValue::Integer(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_float(&self) -> Option<f64> {
+        if let JsonValue::Float(value) = self {
+            Some(*value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&str> {
+        if let JsonValue::String(value) = self {
+            Some(value.as_str())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string_mut(&mut self) -> Option<&mut String> {
+        if let JsonValue::String(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[Self]> {
+        if let JsonValue::Array(value) = self {
+            Some(value.as_slice())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Self>> {
+        if let JsonValue::Array(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&HashMap<String, Self>> {
+        if let JsonValue::Object(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object_mut(&mut self) -> Option<&mut HashMap<String, Self>> {
+        if let JsonValue::Object(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
     pub fn parse_char(src: &str, value: char) -> (&str, Option<char>) {
         if src.starts_with(value) {
             (src.split_once(value).unwrap().1, Some(value))
@@ -114,17 +186,45 @@ impl JsonValue {
         (new_src, Some(JsonValue::from(whole as f64 + frac_part)))
     }
 
-    // TODO: handle `\"`
     pub fn parse_string(src: &str) -> (&str, Option<JsonValue>) {
-        let (new_src, open_quote) = Self::parse_char(src, '"');
+        let (mut new_src, open_quote) = Self::parse_char(src, '"');
 
         if open_quote.is_none() {
             return (src, None);
         }
 
-        let (new_src, string) = Self::parse_span(new_src, |&c| c != '"');
+        let mut string;
+        (new_src, string) = Self::parse_span(new_src, |&c| c != '"');
 
-        let (new_src, close_quote) = Self::parse_char(new_src, '"');
+        while string.ends_with('\\') {
+            let quote;
+            (new_src, quote) = Self::parse_char(new_src, '"');
+
+            if quote.is_none() {
+                return (src, None);
+            }
+
+            let tail;
+            (new_src, tail) = Self::parse_span(new_src, |&c| c != '"');
+
+            // Safety:
+            // 
+            // - '"' is an ASCII character so it requres only one bytes
+            // - `src` contains only valid UTF-8
+            // - we parsed '"' so `src` contains '"'
+            // - we parsed `tail` so `src` contains `tail`
+            string = unsafe {
+                std::str::from_utf8_unchecked(
+                    std::slice::from_raw_parts(
+                        string.as_ptr(),
+                        string.len() + tail.len() + 1
+                    )
+                )
+            };
+        }
+
+        let close_quote;
+        (new_src, close_quote) = Self::parse_char(new_src, '"');
 
         if close_quote.is_none() {
             return (src, None);
@@ -349,7 +449,7 @@ mod tests {
                             "Golden State Warriros",
                             "Huston Rocket"
                         ],
-                        "answer": "Huston Rocket"
+                        "answer": "Huston \"Rocket\""
                     }
                 },
                 "maths": {
@@ -403,5 +503,60 @@ mod tests {
         };
 
         println!("{value:?}");
+    }
+
+    #[test]
+    fn test_print_ages() {
+        let input = r#"[
+            {
+                "name": "Jonson",
+                "age": 19,
+                "gender": "male"
+            },
+            {
+                "name": "Mary",
+                "age": 13,
+                "gender": "female"
+            },
+            {
+                "name": "Sofie",
+                "age": 7,
+                "gender": "female"
+            },
+            {
+                "name": "Max",
+                "age": 21,
+                "gender": "male"
+            },
+            {
+                "name": "Phill",
+                "age": 35,
+                "gender": "male"
+            },
+            {
+                "name": "Joseph",
+                "age": 15,
+                "gender": "male"
+            },
+            {
+                "name": "Kristy",
+                "age": 25,
+                "gendr": "female"
+            }
+        ]"#;
+
+        let json: JsonValue = input.parse().unwrap();
+
+        if let JsonValue::Array(array) = json {
+            for value in array {
+                if let JsonValue::Object(object) = value {
+                    if let Some(JsonValue::Integer(age)) = object.get("age") {
+                        if *age >= 18 {
+                            println!("{object:#?}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
