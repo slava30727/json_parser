@@ -119,17 +119,19 @@ impl JsonValue {
     }
 
     pub fn parse_bool(src: &str) -> (&str, Option<JsonValue>) {
-        let (mut src, mut sub_string) = Self::parse_sequence(src, "true");
+        let (mut new_src, mut sub_string) = Self::parse_sequence(src, "true");
 
-        if sub_string.is_none() {
-            (src, sub_string) = Self::parse_sequence(src, "false");
+        if sub_string.is_some() {
+            return (new_src, Some(JsonValue::from(true)))
         }
 
-        (src, sub_string.map(|s| match s {
-            "true" => JsonValue::from(true),
-            "false" => JsonValue::from(false),
-            _ => unreachable!(),
-        }))
+        (new_src, sub_string) = Self::parse_sequence(src, "false");
+
+        if sub_string.is_some() {
+            return (new_src, Some(JsonValue::from(false)));
+        }
+
+        (src, None)
     }
 
     pub fn parse_integer(src: &str) -> (&str, Option<JsonValue>) {
