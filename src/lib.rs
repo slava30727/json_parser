@@ -1,19 +1,20 @@
-use std::{collections::HashMap, str::FromStr, hint::unreachable_unchecked};
+use std::{collections::HashMap, hint::unreachable_unchecked};
 
 
 
+/// Any value representable in `JSON`.
 #[derive(Clone, Debug, PartialEq)]
-pub enum JsonValue {
+pub enum JsonValue<'src> {
     Null,
     Bool(bool),
     Integer(i64),
     Float(f64),
-    String(String),
-    Array(Vec<JsonValue>),
-    Object(HashMap<String, JsonValue>),
+    String(&'src str),
+    Array(Vec<JsonValue<'src>>),
+    Object(HashMap<&'src str, JsonValue<'src>>),
 }
 
-impl JsonValue {
+impl<'src> JsonValue<'src> {
     pub fn as_bool(&self) -> Option<bool> {
         if let JsonValue::Bool(value) = self {
             Some(*value)
@@ -40,14 +41,6 @@ impl JsonValue {
 
     pub fn as_string(&self) -> Option<&str> {
         if let JsonValue::String(value) = self {
-            Some(value.as_str())
-        } else {
-            None
-        }
-    }
-
-    pub fn as_string_mut(&mut self) -> Option<&mut String> {
-        if let JsonValue::String(value) = self {
             Some(value)
         } else {
             None
@@ -70,7 +63,7 @@ impl JsonValue {
         }
     }
 
-    pub fn as_object(&self) -> Option<&HashMap<String, Self>> {
+    pub fn as_object(&self) -> Option<&HashMap<&str, Self>> {
         if let JsonValue::Object(value) = self {
             Some(value)
         } else {
@@ -78,7 +71,7 @@ impl JsonValue {
         }
     }
 
-    pub fn as_object_mut(&mut self) -> Option<&mut HashMap<String, Self>> {
+    pub fn as_object_mut(&mut self) -> Option<&mut HashMap<&'src str, Self>> {
         if let JsonValue::Object(value) = self {
             Some(value)
         } else {
@@ -368,67 +361,89 @@ impl JsonValue {
 
         (src, value)
     }
+
+    pub fn to_owned(&self) -> JsonValueOwned {
+        match self {
+            JsonValue::Null => JsonValueOwned::Null,
+            JsonValue::Bool(value) => JsonValueOwned::Bool(*value),
+            JsonValue::Integer(value) => JsonValueOwned::Integer(*value),
+            JsonValue::Float(value) => JsonValueOwned::Float(*value),
+            JsonValue::String(value)
+                => JsonValueOwned::String((*value).to_owned()),
+            JsonValue::Array(value) => JsonValueOwned::Array(
+                value.iter().map(|elem| elem.to_owned()).collect()
+            ),
+            JsonValue::Object(value) => JsonValueOwned::Object(
+                value.iter()
+                    .map(|(key, value)| ((*key).to_owned(), value.to_owned()))
+                    .collect()
+            ),
+        }
+    }
+
+    pub fn parse(src: &'src str) -> Option<Self> {
+        let (tail, value) = Self::parse_value(src.trim());
+
+        if !tail.is_empty() {
+            return None;
+        }
+
+        value
+    }
 }
 
-impl From<bool> for JsonValue {
+impl From<bool> for JsonValue<'static> {
     fn from(value: bool) -> Self {
         Self::Bool(value)
     }
 }
 
-impl From<i64> for JsonValue {
+impl From<i64> for JsonValue<'static> {
     fn from(value: i64) -> Self {
         Self::Integer(value)
     }
 }
 
-impl From<f64> for JsonValue {
+impl From<f64> for JsonValue<'static> {
     fn from(value: f64) -> Self {
         Self::Float(value)
     }
 }
 
-impl From<String> for JsonValue {
-    fn from(value: String) -> Self {
+impl<'src> From<&'src str> for JsonValue<'src> {
+    fn from(value: &'src str) -> Self {
         Self::String(value)
     }
 }
 
-impl From<&'_ str> for JsonValue {
-    fn from(value: &str) -> Self {
-        Self::String(value.to_owned())
-    }
-}
-
-impl From<Vec<Self>> for JsonValue {
+impl From<Vec<Self>> for JsonValue<'_> {
     fn from(value: Vec<Self>) -> Self {
         Self::Array(value)
     }
 }
 
-impl From<HashMap<String, Self>> for JsonValue {
-    fn from(value: HashMap<String, Self>) -> Self {
+impl<'src> From<HashMap<&'src str, JsonValue<'src>>> for JsonValue<'src> {
+    fn from(value: HashMap<&'src str, Self>) -> Self {
         Self::Object(value)
     }
 }
 
-impl FromStr for JsonValue {
-    type Err = String;
 
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        let (src, value) = Self::parse_value(src.trim());
 
-        let Some(value) = value else {
-            return Err(format!("failed to parse \"{src}\""));
-        };
+#[derive(Clone, Debug, PartialEq)]
+pub enum JsonValueOwned {
+    Null,
+    Bool(bool),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<Self>),
+    Object(HashMap<String, Self>),
+}
 
-        if !src.is_empty() {
-            return Err(
-                format!("failed to parse entire value, reminder: \"{src}\"")
-            );
-        }
-
-        Ok(value)
+impl From<&JsonValue<'_>> for JsonValueOwned {
+    fn from(value: &JsonValue) -> Self {
+        value.to_owned()
     }
 }
 
@@ -479,7 +494,7 @@ mod tests {
             }
         }"#;
 
-        let value: JsonValue = input.parse().unwrap();
+        let value = JsonValue::parse(input).unwrap();
 
         println!("{value:#?}");
     }
@@ -488,7 +503,7 @@ mod tests {
     fn test_parse_float() {
         let input = 1324.34576.to_string();
 
-        let JsonValue::Float(value) = input.parse().unwrap() else {
+        let JsonValue::Float(value) = JsonValue::parse(&input).unwrap() else {
             panic!()
         };
 
@@ -500,8 +515,8 @@ mod tests {
         let input
             = r#"{   "key"  :     true,  "key341": null  ,   "true" : 234  }"#;
         
-        let JsonValue::Object(value) = input.parse().unwrap() else {
-            panic!()
+        let JsonValue::Object(value) = JsonValue::parse(input).unwrap() else {
+            panic!();
         };
 
         println!("{value:?}");
@@ -547,7 +562,7 @@ mod tests {
             }
         ]"#;
 
-        let json: JsonValue = input.parse().unwrap();
+        let json: JsonValue = JsonValue::parse(input).unwrap();
 
         if let JsonValue::Array(array) = json {
             for value in array {
